@@ -1,0 +1,548 @@
+<title>Shed Monitor</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: a telemetry console — freshness header, filter row, status tiles, then stacked chart cards and a per-node table. System sans + tabular figures, validated categorical/status palette. */
+:root{
+  color-scheme: light;
+  --plane:#f9f9f7; --surface:#fcfcfb; --raised:#ffffff;
+  --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --baseline:#c3c2b7; --border:rgba(11,11,11,0.10);
+  --accent:#2a78d6;
+  /* status (fixed, never themed) */
+  --st-comfort:#0ca30c; --st-alert:#fab219; --st-danger:#ec835a; --st-emergency:#d03b3b;
+  /* categorical node slots (light) */
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100;
+  --s5:#e87ba4; --s6:#008300; --s7:#6250d6; --s8:#e34948;
+  --shadow:0 1px 2px rgba(11,11,11,.05),0 1px 3px rgba(11,11,11,.04);
+  --r:12px;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  color-scheme: dark;
+  --plane:#0d0d0d; --surface:#1a1a19; --raised:#20201e;
+  --ink:#f0efec; --ink-2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --baseline:#383835; --border:rgba(255,255,255,0.10);
+  --accent:#3987e5;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
+  --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
+  --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --plane:#0d0d0d; --surface:#1a1a19; --raised:#20201e;
+  --ink:#f0efec; --ink-2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --baseline:#383835; --border:rgba(255,255,255,0.10);
+  --accent:#3987e5;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
+  --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
+  --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+body{background:var(--plane);color:var(--ink);
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.5;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-block:20px 56px;display:flex;flex-direction:column;gap:18px}
+h1{font-size:19px;font-weight:700;margin:0;letter-spacing:-.01em}
+.sub{color:var(--ink-2);font-size:13px;margin:0}
+.mono{font-variant-numeric:tabular-nums}
+.eyebrow{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:600}
+
+/* header */
+header{display:flex;flex-wrap:wrap;gap:14px 18px;align-items:flex-end;justify-content:space-between}
+.freshness{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--muted);flex:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--muted) 22%,transparent)}
+.dot.live{background:var(--st-comfort);box-shadow:0 0 0 3px color-mix(in srgb,var(--st-comfort) 22%,transparent)}
+.dot.stale{background:var(--st-alert);box-shadow:0 0 0 3px color-mix(in srgb,var(--st-alert) 22%,transparent)}
+.meta{display:flex;gap:16px;flex-wrap:wrap;color:var(--ink-2);font-size:12.5px}
+.meta b{color:var(--ink);font-weight:600}
+.btn{font:inherit;font-size:13px;font-weight:600;color:var(--ink);background:var(--surface);
+  border:1px solid var(--border);border-radius:9px;padding:7px 13px;cursor:pointer;display:inline-flex;align-items:center;gap:7px}
+.btn:hover{border-color:var(--baseline)}
+.btn:focus-visible,.chip:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn.spin svg{animation:sp 1s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.btn.spin svg{animation:none}}
+
+/* controls */
+.controls{display:flex;flex-wrap:wrap;gap:14px 22px;align-items:center;
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px}
+.ctl{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ctl .eyebrow{margin-right:2px}
+.seg{display:inline-flex;background:var(--plane);border:1px solid var(--border);border-radius:8px;padding:2px;gap:2px}
+.seg button{font:inherit;font-size:12.5px;font-weight:600;color:var(--ink-2);background:none;border:none;
+  border-radius:6px;padding:5px 11px;cursor:pointer;font-variant-numeric:tabular-nums}
+.seg button[aria-pressed="true"]{background:var(--raised);color:var(--ink);box-shadow:var(--shadow)}
+.chip{font:inherit;font-size:12.5px;font-weight:600;background:var(--plane);color:var(--ink-2);
+  border:1px solid var(--border);border-radius:999px;padding:4px 11px 4px 9px;cursor:pointer;display:inline-flex;align-items:center;gap:7px}
+.chip[aria-pressed="true"]{color:var(--ink);border-color:transparent;background:color-mix(in srgb,var(--nc) 14%,var(--surface))}
+.chip .sw{width:9px;height:9px;border-radius:50%;background:var(--nc);flex:none;opacity:.35}
+.chip[aria-pressed="true"] .sw{opacity:1}
+
+/* scorecards */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px 15px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.card .lbl{font-size:11.5px;color:var(--muted);font-weight:600;letter-spacing:.03em;text-transform:uppercase}
+.card .val{font-size:27px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1}
+.card .val small{font-size:14px;font-weight:600;color:var(--ink-2)}
+.card .note{font-size:12px;color:var(--ink-2)}
+.badge{align-self:flex-start;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;letter-spacing:.02em;
+  display:inline-flex;align-items:center;gap:6px}
+.badge::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.b-comfort{color:var(--st-comfort);background:color-mix(in srgb,var(--st-comfort) 15%,var(--surface))}
+.b-alert{color:#9a6b00;background:color-mix(in srgb,var(--st-alert) 22%,var(--surface))}
+.b-danger{color:#a6421c;background:color-mix(in srgb,var(--st-danger) 22%,var(--surface))}
+.b-emergency{color:#fff;background:var(--st-emergency)}
+:root[data-theme="dark"] .b-alert,:root:not([data-theme="light"]) .b-alert{color:var(--st-alert)}
+:root[data-theme="dark"] .b-danger,:root:not([data-theme="light"]) .b-danger{color:var(--st-danger)}
+
+/* chart cards */
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.panel h2{font-size:14px;font-weight:700;margin:0;display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+.panel h2 span{font-size:12px;font-weight:500;color:var(--muted)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:720px){.grid2{grid-template-columns:1fr}}
+.chartbox{position:relative;height:260px;min-width:0}
+.chartbox.tall{height:300px}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--ink-2)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:11px;height:3px;border-radius:2px;background:var(--lc);display:inline-block}
+.bandkey{display:flex;flex-wrap:wrap;gap:12px;font-size:11.5px;color:var(--ink-2)}
+.bandkey span{display:inline-flex;align-items:center;gap:6px}
+.bandkey i{width:10px;height:10px;border-radius:3px;display:inline-block}
+
+/* table */
+.tablewrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--r);background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13px;min-width:720px}
+th,td{text-align:right;padding:9px 12px;border-bottom:1px solid var(--grid);white-space:nowrap;font-variant-numeric:tabular-nums}
+th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:var(--surface)}
+thead th{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--surface)}
+tbody tr:last-child td{border-bottom:none}
+.nodecell{display:inline-flex;align-items:center;gap:8px;font-weight:600}
+.nodecell i{width:10px;height:10px;border-radius:3px;background:var(--nc);flex:none}
+.mini-badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
+.stale-tag{font-size:10.5px;font-weight:700;color:var(--st-alert);border:1px solid color-mix(in srgb,var(--st-alert) 45%,transparent);border-radius:999px;padding:1px 6px;margin-left:6px}
+
+/* setup / states */
+.state{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:26px 22px;display:flex;flex-direction:column;gap:14px;max-width:560px;margin:8px auto}
+.state h2{margin:0;font-size:17px}
+.state p{margin:0;color:var(--ink-2);font-size:14px}
+.state ol{margin:0;padding-left:20px;color:var(--ink-2);font-size:13.5px;display:flex;flex-direction:column;gap:5px}
+.field{display:flex;gap:8px;flex-wrap:wrap}
+.field input{flex:1;min-width:0;font:inherit;font-size:13px;padding:9px 11px;border:1px solid var(--border);border-radius:9px;background:var(--plane);color:var(--ink)}
+.btn.primary{background:var(--accent);color:#fff;border-color:transparent}
+.err{color:var(--st-emergency);font-size:13px}
+footer{color:var(--muted);font-size:12px;text-align:center;padding-top:4px}
+footer a{color:var(--ink-2)}
+.hint{color:var(--muted);font-size:12px}
+.spacer{flex:1}
+[hidden]{display:none!important}
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Shed Monitor</h1>
+      <p class="sub">Live environmental readings — Zimbabwean layer shed</p>
+    </div>
+    <div class="freshness" id="fresh" hidden>
+      <span style="display:inline-flex;align-items:center;gap:8px"><span class="dot" id="freshDot"></span><span id="freshText" class="mono" style="font-size:12.5px">—</span></span>
+      <div class="meta" id="totals"></div>
+      <button class="btn" id="refreshBtn" title="Re-pull the latest data">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>
+        Refresh</button>
+    </div>
+  </header>
+
+  <!-- setup -->
+  <section class="state" id="setup" hidden>
+    <h2>Connect your data</h2>
+    <p>Paste the published CSV link from your <b>Shed Monitor</b> sheet. In the sheet: <b>File → Share → Publish to web</b>, choose the <b>readings</b> tab and <b>CSV</b>, publish, and copy the link.</p>
+    <div class="field">
+      <input id="urlInput" type="url" placeholder="https://docs.google.com/spreadsheets/d/e/…/pub?...output=csv" autocomplete="off" spellcheck="false">
+      <button class="btn primary" id="connectBtn">Connect</button>
+    </div>
+    <p class="err" id="setupErr" hidden></p>
+    <p class="hint">The link is stored only in this browser. Once it's set, the dashboard reads your sheet directly.</p>
+  </section>
+
+  <!-- loading / error -->
+  <section class="state" id="loading" hidden><h2>Loading readings…</h2><p>Pulling the latest data from your sheet.</p></section>
+  <section class="state" id="error" hidden>
+    <h2>Couldn't load the data</h2>
+    <p id="errMsg" class="err"></p>
+    <div class="field"><button class="btn" id="retryBtn">Try again</button><button class="btn" id="changeBtn">Change data source</button></div>
+  </section>
+
+  <!-- dashboard -->
+  <div id="dash" hidden style="display:flex;flex-direction:column;gap:18px">
+    <div class="controls">
+      <div class="ctl"><span class="eyebrow">Window</span>
+        <div class="seg" id="rangeSeg">
+          <button data-h="1" aria-pressed="false">1 h</button>
+          <button data-h="24" aria-pressed="false">24 h</button>
+          <button data-h="168" aria-pressed="false">7 d</button>
+          <button data-h="0" aria-pressed="true">All</button>
+        </div>
+      </div>
+      <div class="ctl" id="nodeChips"><span class="eyebrow">Nodes</span></div>
+      <div class="spacer"></div>
+      <button class="btn" id="copyBtn" title="Copy the readings in view as CSV">Copy data</button>
+    </div>
+
+    <div class="cards" id="scorecards"></div>
+
+    <section class="panel">
+      <h2>Heat-stress index (THI) over time <span>comfort &lt;70 · alert 70–75 · danger 76–81 · emergency &gt;81</span></h2>
+      <div class="bandkey">
+        <span><i style="background:color-mix(in srgb,var(--st-comfort) 55%,transparent)"></i>comfort</span>
+        <span><i style="background:color-mix(in srgb,var(--st-alert) 55%,transparent)"></i>alert</span>
+        <span><i style="background:color-mix(in srgb,var(--st-danger) 55%,transparent)"></i>danger</span>
+        <span><i style="background:color-mix(in srgb,var(--st-emergency) 55%,transparent)"></i>emergency</span>
+      </div>
+      <div class="chartbox tall"><canvas id="thiChart"></canvas></div>
+      <div class="legend" id="thiLegend"></div>
+    </section>
+
+    <div class="grid2">
+      <section class="panel"><h2>Temperature <span>°C</span></h2><div class="chartbox"><canvas id="tempChart"></canvas></div></section>
+      <section class="panel"><h2>Humidity <span>% RH</span></h2><div class="chartbox"><canvas id="rhChart"></canvas></div></section>
+    </div>
+
+    <section class="panel">
+      <h2>Time in each comfort band <span>share of readings in the window, per node</span></h2>
+      <div class="chartbox" id="bandBox"><canvas id="bandChart"></canvas></div>
+    </section>
+
+    <section class="panel">
+      <h2>Per-node summary <span>readings in the selected window</span></h2>
+      <div class="tablewrap"><table id="summary"><thead></thead><tbody></tbody></table></div>
+    </section>
+
+    <footer>
+      Built for the layer-shed monitoring project. Data lives in your Google Sheet; this page only reads it.
+      · <a href="#" id="changeSrc">change data source</a>
+    </footer>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+"use strict";
+/* ============ config ============ */
+const BAKED_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSk-8bEXYuaizCjzfClcE_4t7kVY6WHKitqyX9Bsbqa6OYI48pBNy2T1e4gaOXccfBdv_WqADrg5s67/pub?gid=2140760025&single=true&output=csv"; // readings tab, published CSV
+const LS_KEY = "shedmon_csv_url";
+const THI = { alert:70, danger:75, emergency:81 };          // band edges
+const BAND_ORDER = ["comfort","alert","danger","emergency"];
+const BAND_CSSVAR = {comfort:"--st-comfort",alert:"--st-alert",danger:"--st-danger",emergency:"--st-emergency"};
+const SLOTS = ["--s1","--s2","--s3","--s4","--s5","--s6","--s7","--s8"];
+
+/* ============ state ============ */
+let ROWS = [];              // parsed rows
+let NODES = [];             // sorted distinct node ids
+let selected = new Set();   // selected node ids
+let rangeHours = 0;         // 0 = all
+let charts = {};
+let dataUrl = "";
+
+/* ============ helpers ============ */
+const $ = s => document.querySelector(s);
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const nodeColor = id => cssVar(SLOTS[(NODES.indexOf(id)) % SLOTS.length]);
+const num = v => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+function parseDate(s){
+  if(!s) return null;
+  let d = new Date(s);
+  if(!isNaN(d)) return d;
+  // fallback: M/D/YYYY[ H:M[:S]][ AM/PM]
+  const m = String(s).match(/(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AaPp][Mm])?)?/);
+  if(!m) return null;
+  let [_,mo,da,yr,h,mi,se,ap]=m; h=+h||0;
+  if(ap){ ap=ap.toUpperCase(); if(ap==="PM"&&h<12)h+=12; if(ap==="AM"&&h===12)h=0; }
+  return new Date(+yr,+mo-1,+da,h,+mi||0,+se||0);
+}
+function bandOf(thi, label){
+  if(label){ const l=String(label).toLowerCase(); if(BAND_ORDER.includes(l)) return l; }
+  if(thi==null) return null;
+  if(thi<THI.alert) return "comfort";
+  if(thi<=THI.danger) return "alert";
+  if(thi<=THI.emergency) return "danger";
+  return "emergency";
+}
+function relTime(d){
+  if(!d) return "—";
+  const s=Math.max(0,(Date.now()-d.getTime())/1000);
+  if(s<90) return Math.round(s)+"s ago";
+  if(s<5400) return Math.round(s/60)+" min ago";
+  if(s<172800) return Math.round(s/3600)+" h ago";
+  return Math.round(s/86400)+" d ago";
+}
+const fmt=(v,d=1)=> v==null?"—":v.toFixed(d);
+
+/* ============ csv ============ */
+function parseCSV(text){
+  const rows=[]; let i=0, field="", row=[], q=false, t=text.replace(/\r\n?/g,"\n");
+  while(i<t.length){
+    const c=t[i];
+    if(q){ if(c==='"'){ if(t[i+1]==='"'){field+='"';i++;} else q=false; } else field+=c; }
+    else { if(c==='"') q=true; else if(c===","){row.push(field);field="";} else if(c==="\n"){row.push(field);rows.push(row);row=[];field="";} else field+=c; }
+    i++;
+  }
+  if(field.length||row.length){ row.push(field); rows.push(row); }
+  if(!rows.length) return [];
+  const head=rows[0].map(h=>h.trim());
+  return rows.slice(1).filter(r=>r.length>1&&r.some(c=>c!=="")).map(r=>{
+    const o={}; head.forEach((h,j)=>o[h]=(r[j]??"").trim()); return o;
+  });
+}
+function normalize(raw){
+  return raw.map(o=>{
+    const thi=num(o.thi);
+    const t=parseDate(o.reading_utc)||parseDate(o.received_utc);
+    return {
+      node: parseInt(o.node,10),
+      t, recv: parseDate(o.received_utc),
+      temp:num(o.temp_c), rh:num(o.rh_pct), hpa:num(o.pressure_hpa), lux:num(o.lux),
+      batt:num(o.battery_v), rssi:num(o.rssi_dbm), thi,
+      band: bandOf(thi, o.thi_band), flags:o.flags||""
+    };
+  }).filter(r=>Number.isFinite(r.node) && r.t);
+}
+
+/* ============ data load ============ */
+function show(id){ ["setup","loading","error","dash"].forEach(x=>$("#"+x).hidden = x!==id); $("#fresh").hidden = id!=="dash"; }
+async function load(){
+  show("loading");
+  try{
+    const res = await fetch(dataUrl, {cache:"no-store"});
+    if(!res.ok) throw new Error("HTTP "+res.status+" — is the link published to the web as CSV?");
+    const text = await res.text();
+    if(/^\s*</.test(text)) throw new Error("That link returned a web page, not CSV. Use the CSV link from File → Share → Publish to web.");
+    const raw = parseCSV(text);
+    ROWS = normalize(raw);
+    if(!ROWS.length) throw new Error("No readings found in the sheet yet.");
+    NODES = [...new Set(ROWS.map(r=>r.node))].sort((a,b)=>a-b);
+    if(selected.size===0) NODES.forEach(n=>selected.add(n));
+    else [...selected].forEach(n=>{ if(!NODES.includes(n)) selected.delete(n); });
+    NODES.forEach(n=>{ if(![...selected].length) selected.add(n); });
+    buildNodeChips();
+    show("dash");
+    render();
+  }catch(e){
+    $("#errMsg").textContent = e.message || String(e);
+    show("error");
+  }
+}
+
+/* ============ filtering ============ */
+function filtered(){
+  const now = Date.now();
+  return ROWS.filter(r=> selected.has(r.node) && (rangeHours===0 || (now - r.t.getTime()) <= rangeHours*3600*1000));
+}
+
+/* ============ controls ============ */
+function buildNodeChips(){
+  const host=$("#nodeChips");
+  [...host.querySelectorAll(".chip")].forEach(c=>c.remove());
+  NODES.forEach(n=>{
+    const b=document.createElement("button");
+    b.className="chip"; b.setAttribute("aria-pressed", selected.has(n)); b.style.setProperty("--nc", nodeColor(n));
+    b.innerHTML=`<span class="sw"></span>Node ${String(n).padStart(2,"0")}`;
+    b.onclick=()=>{ if(selected.has(n)){ if(selected.size>1) selected.delete(n); } else selected.add(n);
+      b.setAttribute("aria-pressed", selected.has(n)); render(); };
+    host.appendChild(b);
+  });
+}
+$("#rangeSeg").onclick=e=>{ const btn=e.target.closest("button"); if(!btn) return;
+  [...e.currentTarget.children].forEach(c=>c.setAttribute("aria-pressed","false"));
+  btn.setAttribute("aria-pressed","true"); rangeHours=+btn.dataset.h; render(); };
+
+/* ============ render ============ */
+function render(){
+  const data = filtered();
+  renderFreshness();
+  renderScorecards(data);
+  renderCharts(data);
+  renderTable(data);
+}
+function renderFreshness(){
+  const latest = ROWS.reduce((a,r)=> (r.recv&&(!a||r.recv>a))?r.recv:a, null) || ROWS.reduce((a,r)=>(r.t>a?r.t:a),new Date(0));
+  const ageMin = (Date.now()-latest.getTime())/60000;
+  const dot=$("#freshDot"); dot.className="dot "+(ageMin<15?"live":ageMin<120?"":"stale");
+  $("#freshText").textContent = "Updated "+relTime(latest);
+  const span = ROWS.length? (()=>{ const a=ROWS.reduce((m,r)=>r.t<m?r.t:m,ROWS[0].t), b=ROWS.reduce((m,r)=>r.t>m?r.t:m,ROWS[0].t);
+    const days=(b-a)/86400000; return days<1? Math.round((b-a)/3600000)+" h" : Math.round(days)+" d"; })() : "—";
+  $("#totals").innerHTML = `<span><b>${ROWS.length.toLocaleString()}</b> readings</span><span><b>${NODES.length}</b> node${NODES.length>1?"s":""}</span><span><b>${span}</b> span</span>`;
+}
+function renderScorecards(data){
+  // latest reading per selected node
+  const latestByNode = {};
+  data.forEach(r=>{ if(!latestByNode[r.node]||r.t>latestByNode[r.node].t) latestByNode[r.node]=r; });
+  const lat = Object.values(latestByNode);
+  // worst current band
+  let worst=lat.reduce((a,r)=> (r.band&&(!a||BAND_ORDER.indexOf(r.band)>BAND_ORDER.indexOf(a.band)))?r:a, null);
+  const inDanger = data.filter(r=>r.band==="danger"||r.band==="emergency").length;
+  const pctDanger = data.length? (100*inDanger/data.length) : 0;
+  const avg=(k)=>{ const v=lat.map(r=>r[k]).filter(x=>x!=null); return v.length? v.reduce((a,b)=>a+b,0)/v.length : null; };
+  const worstBand = worst? worst.band : null;
+  const cards=[
+    {lbl:"Current status", badge:worstBand, note: worst? `worst of ${lat.length} node${lat.length>1?"s":""} now` : "no data in window"},
+    {lbl:"Latest THI", val:fmt(worst?worst.thi:null,1), note: worst? `node ${String(worst.node).padStart(2,"0")}` : ""},
+    {lbl:"Latest temp", val:fmt(avg("temp"),1), unit:"°C", note:"avg of nodes now"},
+    {lbl:"Latest humidity", val:fmt(avg("rh"),0), unit:"%", note:"avg of nodes now"},
+    {lbl:"Time in danger+", val:fmt(pctDanger,0), unit:"%", note:`${inDanger.toLocaleString()} of ${data.length.toLocaleString()} readings`},
+  ];
+  $("#scorecards").innerHTML = cards.map(c=>{
+    const inner = c.badge!==undefined
+      ? `<div class="badge b-${c.badge||'comfort'}">${c.badge? c.badge : "no data"}</div>`
+      : `<div class="val">${c.val}${c.unit?` <small>${c.unit}</small>`:""}</div>`;
+    return `<div class="card"><div class="lbl">${c.lbl}</div>${inner}<div class="note">${c.note||""}</div></div>`;
+  }).join("");
+}
+
+/* threshold-band backdrop for the THI chart */
+const bandBg = {
+  id:"bandBg",
+  beforeDatasetsDraw(chart){
+    const {ctx, chartArea, scales:{y}} = chart; if(!chartArea) return;
+    const segs=[[-1e3,THI.alert,"--st-comfort"],[THI.alert,THI.danger,"--st-alert"],[THI.danger,THI.emergency,"--st-danger"],[THI.emergency,1e3,"--st-emergency"]];
+    ctx.save();
+    segs.forEach(([lo,hi,v])=>{
+      const yHi=y.getPixelForValue(Math.min(hi,y.max)), yLo=y.getPixelForValue(Math.max(lo,y.min));
+      const top=Math.min(yHi,yLo), h=Math.abs(yLo-yHi); if(h<=0) return;
+      ctx.fillStyle=cssVar(v); ctx.globalAlpha=0.10;
+      ctx.fillRect(chartArea.left, top, chartArea.right-chartArea.left, h);
+    });
+    ctx.restore();
+  }
+};
+
+function axisOpts(){ return {
+  grid:{color:cssVar("--grid"),drawTicks:false}, border:{color:cssVar("--baseline")},
+  ticks:{color:cssVar("--muted"),font:{size:11},padding:6}
+};}
+function timeScale(span){ return {
+  type:"linear",
+  ...axisOpts(),
+  ticks:{...axisOpts().ticks, maxTicksLimit:6, callback:(v)=>{
+    const d=new Date(v); return span>2*86400000
+      ? (d.getMonth()+1)+"/"+d.getDate()
+      : d.getHours().toString().padStart(2,"0")+":"+d.getMinutes().toString().padStart(2,"0");
+  }}
+};}
+function lineDatasets(data, key){
+  return NODES.filter(n=>selected.has(n)).map(n=>{
+    const col=nodeColor(n);
+    const pts=data.filter(r=>r.node===n && r[key]!=null).sort((a,b)=>a.t-b.t).map(r=>({x:r.t.getTime(),y:r[key]}));
+    return {label:"Node "+String(n).padStart(2,"0"), data:pts, borderColor:col, backgroundColor:col,
+      borderWidth:2, pointRadius:pts.length>60?0:2.5, pointHoverRadius:5, tension:.25, spanGaps:true};
+  }).filter(d=>d.data.length);
+}
+function makeLine(id, data, key, yTitle, plugins){
+  if(charts[id]) charts[id].destroy();
+  const ctx=$("#"+id); const ds=lineDatasets(data,key);
+  const span = data.length? (Math.max(...data.map(r=>r.t))-Math.min(...data.map(r=>r.t))) : 0;
+  charts[id]=new Chart(ctx,{type:"line",data:{datasets:ds},plugins:plugins||[],options:{
+    responsive:true,maintainAspectRatio:false,animation:false,
+    interaction:{mode:"nearest",intersect:false},
+    scales:{x:timeScale(span), y:{...axisOpts(), title:{display:!!yTitle,text:yTitle,color:cssVar("--muted"),font:{size:11}}}},
+    plugins:{legend:{display:false}, tooltip:{
+      backgroundColor:cssVar("--raised"),titleColor:cssVar("--ink"),bodyColor:cssVar("--ink-2"),
+      borderColor:cssVar("--border"),borderWidth:1,padding:10,displayColors:true,
+      callbacks:{title:(it)=>new Date(it[0].parsed.x).toLocaleString(), label:(it)=>` ${it.dataset.label}: ${it.parsed.y.toFixed(1)}`}
+    }}
+  }});
+}
+function renderCharts(data){
+  makeLine("thiChart", data, "thi", "THI", [bandBg]);
+  makeLine("tempChart", data, "temp", "°C");
+  makeLine("rhChart", data, "rh", "% RH");
+  // legend for THI
+  $("#thiLegend").innerHTML = NODES.filter(n=>selected.has(n)).map(n=>
+    `<span><i style="--lc:${nodeColor(n)}"></i>Node ${String(n).padStart(2,"0")}</span>`).join("");
+  renderBandChart(data);
+}
+function renderBandChart(data){
+  if(charts.band) charts.band.destroy();
+  const nodes=NODES.filter(n=>selected.has(n));
+  const counts={}; nodes.forEach(n=>counts[n]=Object.fromEntries(BAND_ORDER.map(b=>[b,0])));
+  data.forEach(r=>{ if(r.band && counts[r.node]) counts[r.node][r.band]++; });
+  const labels=nodes.map(n=>"Node "+String(n).padStart(2,"0"));
+  const ds=BAND_ORDER.map(b=>({
+    label:b, backgroundColor:cssVar(BAND_CSSVAR[b]), borderColor:cssVar("--surface"), borderWidth:2, borderRadius:3,
+    data:nodes.map(n=>{ const tot=BAND_ORDER.reduce((a,x)=>a+counts[n][x],0); return tot? 100*counts[n][b]/tot : 0; })
+  }));
+  $("#bandBox").style.height = Math.max(120, 54*nodes.length+40)+"px";
+  charts.band=new Chart($("#bandChart"),{type:"bar",data:{labels,datasets:ds},options:{
+    indexAxis:"y",responsive:true,maintainAspectRatio:false,animation:false,
+    scales:{x:{stacked:true,max:100,...axisOpts(),ticks:{...axisOpts().ticks,callback:v=>v+"%"}},
+            y:{stacked:true,...axisOpts(),grid:{display:false}}},
+    plugins:{legend:{display:false}, tooltip:{
+      backgroundColor:cssVar("--raised"),titleColor:cssVar("--ink"),bodyColor:cssVar("--ink-2"),borderColor:cssVar("--border"),borderWidth:1,padding:10,
+      callbacks:{label:(it)=>` ${it.dataset.label}: ${it.parsed.x.toFixed(0)}%`}}}
+  }});
+}
+function renderTable(data){
+  const by={}; NODES.filter(n=>selected.has(n)).forEach(n=>by[n]=[]);
+  data.forEach(r=>{ if(by[r.node]) by[r.node].push(r); });
+  const stat=(arr,k)=>{ const v=arr.map(r=>r[k]).filter(x=>x!=null); if(!v.length) return null;
+    return {min:Math.min(...v),max:Math.max(...v),avg:v.reduce((a,b)=>a+b,0)/v.length}; };
+  const cols=["Node","Last seen","Latest THI","Temp °C (min/avg/max)","RH % (min/avg/max)","% danger+","Batt V","Signal dBm","n"];
+  $("#summary thead").innerHTML="<tr>"+cols.map(c=>`<th>${c}</th>`).join("")+"</tr>";
+  const body=Object.keys(by).map(n=>{
+    const arr=by[n].sort((a,b)=>a.t-b.t); const last=arr[arr.length-1];
+    const t=stat(arr,"temp"), h=stat(arr,"rh");
+    const dang=arr.filter(r=>r.band==="danger"||r.band==="emergency").length;
+    const pct=arr.length?100*dang/arr.length:0;
+    const ageMin=last?(Date.now()-last.t.getTime())/60000:1e9;
+    const band=last?last.band:null;
+    const tr=(s,d=1)=> s? `${s.min.toFixed(d)} / <b>${s.avg.toFixed(d)}</b> / ${s.max.toFixed(d)}` : "—";
+    return `<tr>
+      <td><span class="nodecell"><i style="--nc:${nodeColor(+n)}"></i>Node ${String(n).padStart(2,"0")}</span></td>
+      <td>${last?relTime(last.t):"—"}${ageMin>60?'<span class="stale-tag">stale</span>':''}</td>
+      <td><span class="mini-badge b-${band||'comfort'}">${last&&last.thi!=null?last.thi.toFixed(1):"—"}${band?` ${band}`:""}</span></td>
+      <td>${tr(t)}</td><td>${tr(h,0)}</td>
+      <td>${pct.toFixed(0)}%</td>
+      <td>${last&&last.batt!=null?last.batt.toFixed(2):"—"}</td>
+      <td>${last&&last.rssi!=null?last.rssi.toFixed(0):"—"}</td>
+      <td>${arr.length}</td></tr>`;
+  }).join("");
+  $("#summary tbody").innerHTML=body;
+}
+
+/* ============ copy ============ */
+$("#copyBtn").onclick=async()=>{
+  const data=filtered();
+  const head=["node","reading_utc","temp_c","rh_pct","pressure_hpa","lux","battery_v","rssi_dbm","thi","thi_band"];
+  const lines=[head.join(",")].concat(data.sort((a,b)=>a.t-b.t).map(r=>
+    [r.node,r.t.toISOString(),r.temp,r.rh,r.hpa,r.lux,r.batt,r.rssi,r.thi,r.band].map(v=>v==null?"":v).join(",")));
+  const txt=lines.join("\n"); const btn=$("#copyBtn");
+  try{ await navigator.clipboard.writeText(txt); btn.textContent="Copied ✓"; }
+  catch{ btn.textContent="Press ⌘C"; const ta=document.createElement("textarea");ta.value=txt;document.body.appendChild(ta);ta.select(); }
+  setTimeout(()=>btn.textContent="Copy data",1600);
+};
+
+/* ============ events ============ */
+$("#refreshBtn").onclick=()=>{ const b=$("#refreshBtn"); b.classList.add("spin"); load().finally(()=>setTimeout(()=>b.classList.remove("spin"),400)); };
+$("#retryBtn").onclick=load;
+$("#connectBtn").onclick=()=>{
+  const v=$("#urlInput").value.trim();
+  if(!/^https?:\/\//.test(v)){ $("#setupErr").hidden=false; $("#setupErr").textContent="Please paste the full https:// CSV link."; return; }
+  try{ localStorage.setItem(LS_KEY,v); }catch{}
+  dataUrl=v; load();
+};
+$("#urlInput")&&$("#urlInput").addEventListener("keydown",e=>{ if(e.key==="Enter") $("#connectBtn").click(); });
+function changeSource(){ dataUrl=""; try{localStorage.removeItem(LS_KEY);}catch{} $("#urlInput").value=""; show("setup"); }
+$("#changeBtn").onclick=changeSource;
+$("#changeSrc").onclick=e=>{e.preventDefault();changeSource();};
+// re-theme charts when the OS/theme changes
+const mq=window.matchMedia("(prefers-color-scheme: dark)");
+mq.addEventListener&&mq.addEventListener("change",()=>{ if(!$("#dash").hidden) render(); });
+
+/* ============ boot ============ */
+(function init(){
+  let stored=""; try{ stored=localStorage.getItem(LS_KEY)||""; }catch{}
+  dataUrl = BAKED_CSV_URL || stored;
+  if(dataUrl) load(); else show("setup");
+})();
+</script>
