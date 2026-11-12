@@ -1,5 +1,9 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Shed Monitor</title>
-<meta name="claude:viewport-fit-sides" content="cover">
 <style>
 /* Layout: a telemetry console — freshness header, filter row, status tiles, then stacked chart cards and a per-node table. System sans + tabular figures, validated categorical/status palette. */
 :root{
@@ -102,6 +106,7 @@ header{display:flex;flex-wrap:wrap;gap:14px 18px;align-items:flex-end;justify-co
 .panel h2 span{font-size:12px;font-weight:500;color:var(--muted)}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 @media (max-width:720px){.grid2{grid-template-columns:1fr}}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:16px}
 .chartbox{position:relative;height:260px;min-width:0}
 .chartbox.tall{height:300px}
 .legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--ink-2)}
@@ -138,6 +143,8 @@ footer a{color:var(--ink-2)}
 .spacer{flex:1}
 [hidden]{display:none!important}
 </style>
+</head>
+<body>
 
 <div class="wrap">
   <header>
@@ -188,6 +195,7 @@ footer a{color:var(--ink-2)}
       <div class="ctl" id="nodeChips"><span class="eyebrow">Nodes</span></div>
       <div class="spacer"></div>
       <button class="btn" id="copyBtn" title="Copy the readings in view as CSV">Copy data</button>
+      <button class="btn" id="dlBtn" title="Download the readings in view as a CSV file">Download CSV</button>
     </div>
 
     <div class="cards" id="scorecards"></div>
@@ -204,9 +212,10 @@ footer a{color:var(--ink-2)}
       <div class="legend" id="thiLegend"></div>
     </section>
 
-    <div class="grid2">
+    <div class="grid3">
       <section class="panel"><h2>Temperature <span>°C</span></h2><div class="chartbox"><canvas id="tempChart"></canvas></div></section>
       <section class="panel"><h2>Humidity <span>% RH</span></h2><div class="chartbox"><canvas id="rhChart"></canvas></div></section>
+      <section class="panel"><h2>Light <span>lux</span></h2><div class="chartbox"><canvas id="luxChart"></canvas></div></section>
     </div>
 
     <section class="panel">
@@ -215,12 +224,20 @@ footer a{color:var(--ink-2)}
     </section>
 
     <section class="panel">
+      <h2>Node health <span>battery &amp; signal over time — spot a dying cell or a weak link</span></h2>
+      <div class="grid2">
+        <div style="min-width:0"><div class="eyebrow" style="margin-bottom:6px">Battery · V</div><div class="chartbox"><canvas id="battChart"></canvas></div></div>
+        <div style="min-width:0"><div class="eyebrow" style="margin-bottom:6px">Signal · dBm (closer to 0 = stronger)</div><div class="chartbox"><canvas id="rssiChart"></canvas></div></div>
+      </div>
+    </section>
+
+    <section class="panel">
       <h2>Per-node summary <span>readings in the selected window</span></h2>
       <div class="tablewrap"><table id="summary"><thead></thead><tbody></tbody></table></div>
     </section>
 
     <footer>
-      Built for the layer-shed monitoring project. Data lives in your Google Sheet; this page only reads it.
+      Built for the layer-shed monitoring project. Data lives in your Google Sheet; this page only reads it. Auto-refreshes every minute.
       · <a href="#" id="changeSrc">change data source</a>
     </footer>
   </div>
@@ -438,7 +455,7 @@ function lineDatasets(data, key){
       borderWidth:2, pointRadius:pts.length>60?0:2.5, pointHoverRadius:5, tension:.25, spanGaps:true};
   }).filter(d=>d.data.length);
 }
-function makeLine(id, data, key, yTitle, plugins){
+function makeLine(id, data, key, yTitle, plugins, dec){
   if(charts[id]) charts[id].destroy();
   const ctx=$("#"+id); const ds=lineDatasets(data,key);
   const span = data.length? (Math.max(...data.map(r=>r.t))-Math.min(...data.map(r=>r.t))) : 0;
@@ -449,7 +466,7 @@ function makeLine(id, data, key, yTitle, plugins){
     plugins:{legend:{display:false}, tooltip:{
       backgroundColor:cssVar("--raised"),titleColor:cssVar("--ink"),bodyColor:cssVar("--ink-2"),
       borderColor:cssVar("--border"),borderWidth:1,padding:10,displayColors:true,
-      callbacks:{title:(it)=>new Date(it[0].parsed.x).toLocaleString(), label:(it)=>` ${it.dataset.label}: ${it.parsed.y.toFixed(1)}`}
+      callbacks:{title:(it)=>new Date(it[0].parsed.x).toLocaleString(), label:(it)=>` ${it.dataset.label}: ${it.parsed.y.toFixed(dec==null?1:dec)}`}
     }}
   }});
 }
@@ -457,6 +474,9 @@ function renderCharts(data){
   makeLine("thiChart", data, "thi", "THI", [bandBg]);
   makeLine("tempChart", data, "temp", "°C");
   makeLine("rhChart", data, "rh", "% RH");
+  makeLine("luxChart", data, "lux", "lux", null, 0);
+  makeLine("battChart", data, "batt", "V", null, 2);
+  makeLine("rssiChart", data, "rssi", "dBm", null, 0);
   // legend for THI
   $("#thiLegend").innerHTML = NODES.filter(n=>selected.has(n)).map(n=>
     `<span><i style="--lc:${nodeColor(n)}"></i>Node ${String(n).padStart(2,"0")}</span>`).join("");
@@ -510,16 +530,23 @@ function renderTable(data){
   $("#summary tbody").innerHTML=body;
 }
 
-/* ============ copy ============ */
-$("#copyBtn").onclick=async()=>{
+/* ============ copy / download ============ */
+function buildCSV(){
   const data=filtered();
   const head=["node","reading_utc","temp_c","rh_pct","pressure_hpa","lux","battery_v","rssi_dbm","thi","thi_band"];
-  const lines=[head.join(",")].concat(data.sort((a,b)=>a.t-b.t).map(r=>
-    [r.node,r.t.toISOString(),r.temp,r.rh,r.hpa,r.lux,r.batt,r.rssi,r.thi,r.band].map(v=>v==null?"":v).join(",")));
-  const txt=lines.join("\n"); const btn=$("#copyBtn");
+  return [head.join(",")].concat(data.sort((a,b)=>a.t-b.t).map(r=>
+    [r.node,r.t.toISOString(),r.temp,r.rh,r.hpa,r.lux,r.batt,r.rssi,r.thi,r.band].map(v=>v==null?"":v).join(","))).join("\n");
+}
+$("#copyBtn").onclick=async()=>{
+  const txt=buildCSV(); const btn=$("#copyBtn");
   try{ await navigator.clipboard.writeText(txt); btn.textContent="Copied ✓"; }
   catch{ btn.textContent="Press ⌘C"; const ta=document.createElement("textarea");ta.value=txt;document.body.appendChild(ta);ta.select(); }
   setTimeout(()=>btn.textContent="Copy data",1600);
+};
+$("#dlBtn").onclick=()=>{
+  const blob=new Blob([buildCSV()],{type:"text/csv"}); const url=URL.createObjectURL(blob);
+  const a=document.createElement("a"); a.href=url; a.download="shed-monitor-"+new Date().toISOString().slice(0,10)+".csv";
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1000);
 };
 
 /* ============ events ============ */
@@ -544,5 +571,9 @@ mq.addEventListener&&mq.addEventListener("change",()=>{ if(!$("#dash").hidden) r
   let stored=""; try{ stored=localStorage.getItem(LS_KEY)||""; }catch{}
   dataUrl = BAKED_CSV_URL || stored;
   if(dataUrl) load(); else show("setup");
+  // auto-refresh every minute while the dashboard is visible and the tab is active
+  setInterval(()=>{ if(!document.hidden && dataUrl && !$("#dash").hidden) load(); }, 60000);
 })();
 </script>
+</body>
+</html>
